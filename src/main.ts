@@ -5,7 +5,10 @@ import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app =
+    await NestFactory.create<NestExpressApplication>(
+      AppModule,
+    );
 
   app.enableCors({
     origin: process.env.FRONTEND_URL,
@@ -20,17 +23,20 @@ async function bootstrap() {
   );
 
   app.useStaticAssets(
-  join(process.cwd(), 'uploads'),
-  {
-    prefix: '/uploads/',
-  },
-);
+    join(process.cwd(), 'uploads'),
+    {
+      prefix: '/uploads/',
+    },
+  );
 
-  const port = process.env.PORT || 5555;
+  const port =
+    process.env.PORT || 5555;
 
-await app.listen(port);
+  await app.listen(port);
 
-  console.log(`🚀 DESIRE Backend running on http://localhost:${process.env.PORT || 5555}`);
+  console.log(
+    `🚀 DESIRE Backend running on port ${port}`,
+  );
 }
 
 bootstrap();
