@@ -19,6 +19,13 @@ export class UploadsService {
     request: any,
     filename: string,
   ): string {
+    const apiUrl =
+      process.env.API_URL?.replace(/\/+$/, '');
+
+    if (apiUrl) {
+      return `${apiUrl}/uploads/${filename}`;
+    }
+
     return `${request.protocol}://${request.get(
       'host',
     )}/uploads/${filename}`;
