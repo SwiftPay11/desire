@@ -3,11 +3,13 @@ import {
   IsNotEmpty,
   IsOptional,
   IsPhoneNumber,
+  IsString,
   MinLength,
 } from 'class-validator';
 
 export class RegisterDto {
   @IsNotEmpty()
+  @IsString()
   fullName: string;
 
   @IsEmail()
@@ -17,6 +19,9 @@ export class RegisterDto {
   password: string;
 
   @IsOptional()
-  @IsPhoneNumber()
+  @IsPhoneNumber('NG', {
+    message:
+      'Please enter a valid Nigerian phone number.',
+  })
   phone?: string;
 }

@@ -1734,6 +1734,40 @@ if (paymentAlreadyUsed) {
   };
 }
 
+ async recordInstallmentPaymentForAdmin(
+  dto: RecordInstallmentPaymentDto,
+): Promise<{
+  message: string;
+  amountReceived: number;
+  amountApplied: number;
+  excessAmount: number;
+  purchaseCompleted: boolean;
+}> {
+  this.validateObjectId(
+    dto.installmentId,
+    'Invalid installment ID.',
+  );
+
+  const installment =
+    await this.installmentModel
+      .findById(
+        dto.installmentId,
+      )
+      .select('user')
+      .exec();
+
+  if (!installment) {
+    throw new NotFoundException(
+      'DESIRE CREDIT installment not found.',
+    );
+  }
+
+  return this.recordInstallmentPayment(
+    installment.user.toString(),
+    dto,
+  );
+}
+
 @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
 async monitorCreditAccounts(): Promise<void> {
   await this.markOverdueInstallments();
@@ -2501,6 +2535,155 @@ async getMyCreditPurchase(
   }
 
   return purchase;
+}
+
+async getAllCreditPurchases(
+  status?: CreditPurchaseStatus,
+): Promise<CreditPurchaseDocument[]> {
+  const filter: {
+    status?: CreditPurchaseStatus;
+  } = {};
+
+  if (status) {
+    filter.status = status;
+  }
+
+  return this.creditPurchaseModel
+    .find(filter)
+    .populate(
+      'user',
+      'firstName lastName email phone',
+    )
+    .populate(
+      'creditAccount',
+      'creditLimit usedCredit availableCredit commitmentPayment installmentPlan status outstandingBalance',
+    )
+    .populate(
+      'order',
+      'orderNumber totalAmount status paymentStatus createdAt',
+    )
+    .populate(
+      'commitmentPayment',
+      'reference providerReference amount status purpose paidAt verifiedAt',
+    )
+    .sort({
+      createdAt: -1,
+    })
+    .exec();
+}
+
+async getCreditPurchaseForAdmin(
+  purchaseId: string,
+): Promise<CreditPurchaseDocument> {
+  this.validateObjectId(
+    purchaseId,
+    'Invalid DESIRE CREDIT purchase ID.',
+  );
+
+  const purchase =
+    await this.creditPurchaseModel
+      .findById(purchaseId)
+      .populate(
+        'user',
+        'firstName lastName email phone',
+      )
+      .populate(
+        'creditAccount',
+        'creditLimit usedCredit availableCredit commitmentPayment installmentPlan status totalBorrowed totalRepaid outstandingBalance overdueBalance nextPaymentDueDate nextPaymentAmount',
+      )
+      .populate('order')
+      .populate(
+        'commitmentPayment',
+        'reference providerReference amount currency provider purpose status proofOfPaymentUrl senderName transferReference transferDate submittedAmount paidAt verifiedAt createdAt',
+      )
+      .exec();
+
+  if (!purchase) {
+    throw new NotFoundException(
+      'DESIRE CREDIT purchase not found.',
+    );
+  }
+
+  return purchase;
+}
+
+ async getAllInstallmentsForAdmin(
+  status?: InstallmentStatus,
+): Promise<InstallmentDocument[]> {
+  const filter: {
+    status?: InstallmentStatus;
+  } = {};
+
+  if (status) {
+    filter.status = status;
+  }
+
+  return this.installmentModel
+    .find(filter)
+    .populate(
+      'user',
+      'firstName lastName email phone',
+    )
+    .populate(
+      'creditAccount',
+      'creditLimit usedCredit availableCredit status outstandingBalance overdueBalance nextPaymentDueDate nextPaymentAmount',
+    )
+    .populate(
+      'creditPurchase',
+      'orderAmount financedAmount amountRepaid outstandingBalance installmentPlan installmentAmount status commitmentPaymentPaid activatedAt firstPaymentDueDate finalPaymentDueDate',
+    )
+    .populate(
+      'order',
+      'orderNumber totalAmount status paymentStatus createdAt',
+    )
+    .populate(
+      'payments',
+      'reference providerReference amount status purpose paidAt verifiedAt createdAt',
+    )
+    .sort({
+      dueDate: 1,
+      installmentNumber: 1,
+    })
+    .exec();
+}
+
+async getInstallmentForAdmin(
+  installmentId: string,
+): Promise<InstallmentDocument> {
+  this.validateObjectId(
+    installmentId,
+    'Invalid DESIRE CREDIT installment ID.',
+  );
+
+  const installment =
+    await this.installmentModel
+      .findById(installmentId)
+      .populate(
+        'user',
+        'firstName lastName email phone',
+      )
+      .populate(
+        'creditAccount',
+        'creditLimit usedCredit availableCredit commitmentPayment installmentPlan status totalBorrowed totalRepaid outstandingBalance overdueBalance nextPaymentDueDate nextPaymentAmount',
+      )
+      .populate(
+        'creditPurchase',
+        'orderAmount commitmentPaymentAmount financedAmount amountRepaid outstandingBalance installmentPlan installmentAmount status commitmentPaymentPaid commitmentPaymentReference commitmentPaymentPaidAt activatedAt firstPaymentDueDate finalPaymentDueDate fullyPaidAt overdueAt defaultedAt cancelledAt statusReason notes',
+      )
+      .populate('order')
+      .populate(
+        'payments',
+        'reference providerReference amount currency provider purpose status proofOfPaymentUrl senderName transferReference transferDate submittedAmount paidAt verifiedAt createdAt',
+      )
+      .exec();
+
+  if (!installment) {
+    throw new NotFoundException(
+      'DESIRE CREDIT installment not found.',
+    );
+  }
+
+  return installment;
 }
 
 async getMyInstallments(

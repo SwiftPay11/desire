@@ -9,7 +9,9 @@ import {
   Types,
 } from 'mongoose';
 
-import { CreditInstallmentPlan } from '../enums/credit-installment-plan.enum';
+import {
+  CreditInstallmentPlan,
+} from '../enums/credit-installment-plan.enum';
 
 export enum CreditPurchaseStatus {
   PENDING_COMMITMENT_PAYMENT =
@@ -93,16 +95,11 @@ export class CreditPurchase {
   outstandingBalance: number;
 
   @Prop({
-    type: Number,
-    enum: [2, 3, 4, 6, 9, 12],
+    type: String,
+    enum: CreditInstallmentPlan,
     required: true,
   })
-  @Prop({
-  type: String,
-  enum: CreditInstallmentPlan,
-  required: true,
-})
-installmentPlan: CreditInstallmentPlan;
+  installmentPlan: CreditInstallmentPlan;
 
   @Prop({
     required: true,
@@ -195,11 +192,11 @@ installmentPlan: CreditInstallmentPlan;
   statusReason: string;
 
   @Prop({
-  trim: true,
-  maxlength: 1000,
-  default: '',
-})
-notes: string;
+    trim: true,
+    maxlength: 1000,
+    default: '',
+  })
+  notes: string;
 }
 
 export const CreditPurchaseSchema =

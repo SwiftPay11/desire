@@ -33,6 +33,10 @@ import {
 } from './dto/create-credit-purchase.dto';
 
 import {
+  CreditPurchaseStatus,
+} from './schemas/credit-purchase.schema';
+
+import {
   VerifyCommitmentPaymentDto,
 } from './dto/verify-commitment-payment.dto';
 
@@ -47,6 +51,10 @@ import {
 import {
   CreditAccountStatus,
 } from './schemas/credit-account.schema';
+
+import {
+  InstallmentStatus,
+} from './schemas/installment.schema';
 
 import {
   JwtAuthGuard,
@@ -373,6 +381,86 @@ export class DesireCreditController {
         dto,
       );
   }
+
+    /*
+  |--------------------------------------------------------------------------
+  | ADMIN CREDIT PURCHASE ROUTES
+  |--------------------------------------------------------------------------
+  */
+
+  @Get('admin/purchases')
+  @UseGuards(
+    JwtAuthGuard,
+    RolesGuard,
+  )
+  @Roles(Role.ADMIN)
+  getAllCreditPurchases(
+    @Query('status')
+    status?: CreditPurchaseStatus,
+  ) {
+    return this.desireCreditService
+      .getAllCreditPurchases(status);
+  }
+
+  @Get('admin/purchases/:purchaseId')
+  @UseGuards(
+    JwtAuthGuard,
+    RolesGuard,
+  )
+  @Roles(Role.ADMIN)
+  getCreditPurchaseForAdmin(
+    @Param('purchaseId')
+    purchaseId: string,
+  ) {
+    return this.desireCreditService
+      .getCreditPurchaseForAdmin(
+        purchaseId,
+      );
+  }
+
+  @Get('admin/installments')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
+getAllInstallmentsForAdmin(
+  @Query('status')
+  status?: InstallmentStatus,
+) {
+  return this.desireCreditService
+    .getAllInstallmentsForAdmin(
+      status,
+    );
+}
+
+@Post('admin/installments/apply-payment')
+@UseGuards(
+  JwtAuthGuard,
+  RolesGuard,
+)
+@Roles(Role.ADMIN)
+recordInstallmentPaymentForAdmin(
+  @Body()
+  dto: RecordInstallmentPaymentDto,
+) {
+  return this.desireCreditService
+    .recordInstallmentPaymentForAdmin(
+      dto,
+    );
+}
+
+@Get(
+  'admin/installments/:installmentId',
+)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
+getInstallmentForAdmin(
+  @Param('installmentId')
+  installmentId: string,
+) {
+  return this.desireCreditService
+    .getInstallmentForAdmin(
+      installmentId,
+    );
+}
 
   /*
   |--------------------------------------------------------------------------

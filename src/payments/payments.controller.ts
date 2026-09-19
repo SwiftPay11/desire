@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Query,
   Param,
   Patch,
   Post,
@@ -22,6 +23,11 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 import { SubmitPaymentProofDto } from './dto/submit-payment-proof.dto';
+
+import {
+  PaymentPurpose,
+  PaymentStatus,
+} from './schemas/payment.schema';
 
 @Controller('payments')
 export class PaymentsController {
@@ -72,11 +78,20 @@ export class PaymentsController {
   // ==========================
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  findAll() {
-    return this.paymentsService.findAll();
-  }
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
+findAll(
+  @Query('purpose')
+  purpose?: PaymentPurpose,
+
+  @Query('status')
+  status?: PaymentStatus,
+) {
+  return this.paymentsService.findAll(
+    purpose,
+    status,
+  );
+}
 
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)

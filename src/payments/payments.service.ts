@@ -556,26 +556,62 @@ export class PaymentsService {
     };
   }
 
-  async findAll() {
-    const payments =
-      await this.paymentModel
-        .find()
-        .populate(
-          'user',
-          'firstName lastName email',
-        )
-        .populate(
-          'order',
-          'orderNumber totalAmount status paymentStatus',
-        )
-        .sort({
-          createdAt: -1,
-        });
+  async findAll(
+  purpose?: PaymentPurpose,
+  status?: PaymentStatus,
+) {
+  const filter: {
+    purpose?: PaymentPurpose;
+    status?: PaymentStatus;
+  } = {};
 
-    return {
-      payments,
-    };
+  if (purpose) {
+    if (
+      !Object.values(
+        PaymentPurpose,
+      ).includes(purpose)
+    ) {
+      throw new BadRequestException(
+        'Invalid payment purpose.',
+      );
+    }
+
+    filter.purpose = purpose;
   }
+
+  if (status) {
+    if (
+      !Object.values(
+        PaymentStatus,
+      ).includes(status)
+    ) {
+      throw new BadRequestException(
+        'Invalid payment status.',
+      );
+    }
+
+    filter.status = status;
+  }
+
+  const payments =
+    await this.paymentModel
+      .find(filter)
+      .populate(
+        'user',
+        'firstName lastName email',
+      )
+      .populate(
+        'order',
+        'orderNumber totalAmount status paymentStatus',
+      )
+      .sort({
+        createdAt: -1,
+      });
+
+  return {
+    payments,
+  };
+}
 
   async findOneForAdmin(
     paymentId: string,
