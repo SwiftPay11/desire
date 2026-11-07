@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 
 import { InjectModel } from '@nestjs/mongoose';
+import { MailService } from '../mail/mail.service';
+import { UsersService } from '../users/users.service';
 
 import {
   Model,
@@ -109,6 +111,9 @@ export class DesireCreditService {
     @InjectModel(Order.name)
     private readonly orderModel:
       Model<OrderDocument>,
+
+    private readonly mailService: MailService,
+    private readonly usersService: UsersService,
   ) {}
 
   /*
@@ -231,7 +236,51 @@ export class DesireCreditService {
         rejectedAt: null,
       });
 
-    return application.save();
+    const savedApplication = await application.save();
+
+try {
+  const user = await this.usersService.findById(userId);
+
+  const email = user?.email || savedApplication.email;
+  const fullName = user?.fullName || 'Customer';
+
+  const applicationReference =
+    savedApplication._id.toString();
+
+  const emailResults = await Promise.allSettled([
+    this.mailService.sendCreditApplicationSubmittedEmail({
+      email,
+      fullName,
+      applicationReference,
+    }),
+
+    this.mailService.sendNewCreditApplicationAdminEmail({
+      fullName,
+      email,
+      applicationReference,
+    }),
+  ]);
+
+  for (const result of emailResults) {
+    if (result.status === 'rejected') {
+      console.error(
+        'DESIRE CREDIT application notification error:',
+        result.reason,
+      );
+    } else if (result.value === false) {
+      console.error(
+        'DESIRE CREDIT application notification delivery failed.',
+      );
+    }
+  }
+} catch (error) {
+  console.error(
+    'DESIRE CREDIT application email error:',
+    error,
+  );
+}
+
+return savedApplication;
   }
 
   async getMyApplications(
@@ -479,9 +528,39 @@ async reviewApplication(
 
     application.approvedAmount = 0;
 
-    application.approvedInstallmentPlan = null;
+   application.approvedInstallmentPlan = null;
 
-    return application.save();
+// Save the rejected application first.
+const savedApplication = await application.save();
+
+// Send rejection email without affecting the saved decision.
+try {
+  const user = await this.usersService.findById(
+    application.user.toString(),
+  );
+
+  const email = user?.email || application.email;
+
+  const fullName = user?.fullName || 'Customer';
+
+  const applicationReference =
+    savedApplication._id.toString();
+
+  await this.mailService.sendCreditApplicationRejectedEmail({
+    email,
+    fullName,
+    applicationReference,
+    rejectionReason: savedApplication.rejectionReason,
+  });
+} catch (error) {
+  console.error(
+    'DESIRE CREDIT rejection email error:',
+    error,
+  );
+}
+
+return savedApplication;
+
   }
 
   if (
@@ -1990,9 +2069,41 @@ async getDashboardStatistics() {
 
   application.approvedAt = now;
 
-  application.rejectedAt = null;
+application.rejectedAt = null;
 
-  return application.save();
+// Save the approved application first.
+const savedApplication = await application.save();
+
+// Send approval email without affecting the saved decision.
+try {
+  const user = await this.usersService.findById(
+    application.user.toString(),
+  );
+
+  const email = user?.email || application.email;
+
+  const fullName = user?.fullName || 'Customer';
+
+  const applicationReference =
+    savedApplication._id.toString();
+
+  await this.mailService.sendCreditApplicationApprovedEmail({
+    email,
+    fullName,
+    applicationReference,
+    approvedAmount: savedApplication.approvedAmount,
+    installmentPlan: String(
+      savedApplication.approvedInstallmentPlan,
+    ),
+  });
+} catch (error) {
+  console.error(
+    'DESIRE CREDIT approval email error:',
+    error,
+  );
+}
+
+return savedApplication;
 }
 
  private updateCreditAccountStatus(

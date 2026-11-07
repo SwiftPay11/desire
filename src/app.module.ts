@@ -25,6 +25,7 @@ import { AdminDashboardService } from './admin-dashboard/admin-dashboard.service
 import { AdminDashboardController } from './admin-dashboard/admin-dashboard.controller';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { CollectionsModule } from './collections/collections.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { CollectionsModule } from './collections/collections.module';
     NotificationsModule,
     AdminDashboardModule,
     CollectionsModule,
+    MailModule,
   ],
   controllers: [AppController, AdminDashboardController],
   providers: [AppService, AdminDashboardService],

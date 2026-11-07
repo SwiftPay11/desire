@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+
 import { MongooseModule } from '@nestjs/mongoose';
 
 import {
@@ -22,7 +23,10 @@ import {
 } from '../addressess/schemas/address.schema';
 
 import { OrdersController } from './orders.controller';
+
 import { OrdersService } from './orders.service';
+
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -44,6 +48,8 @@ import { OrdersService } from './orders.service';
         schema: AddressSchema,
       },
     ]),
+
+    UsersModule,
   ],
 
   controllers: [

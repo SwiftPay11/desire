@@ -31,6 +31,9 @@ import { PaymentsService } from './payments.service';
 
 import { NotificationsModule } from '../notifications/notifications.module';
 
+// Required for UsersService injection
+import { UsersModule } from '../users/users.module';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -57,6 +60,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
 
     NotificationsModule,
+
+    UsersModule,
   ],
 
   controllers: [

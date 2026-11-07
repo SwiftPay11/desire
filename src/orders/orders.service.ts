@@ -37,6 +37,9 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { UpdatePaymentStatusDto } from './dto/update-payment-status.dto';
 
+import { MailService } from '../mail/mail.service';
+import { UsersService } from '../users/users.service';
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -55,6 +58,10 @@ export class OrdersService {
     @InjectModel(Address.name)
     private readonly addressModel:
       Model<AddressDocument>,
+
+    private readonly mailService: MailService,
+
+    private readonly usersService: UsersService,
   ) {}
 
   async create(
@@ -288,6 +295,59 @@ export class OrdersService {
     cart.items = [];
 
     await cart.save();
+
+    /*
+     * EMAIL NOTIFICATIONS
+     *
+     * Only send emails after the order
+     * has been created successfully.
+     *
+     * Email failures must not affect
+     * the customer's completed order.
+     */
+    try {
+      const user =
+        await this.usersService.findById(
+          userId,
+        );
+
+      if (user) {
+        const emailItems =
+          orderItems.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+          }));
+
+        await Promise.allSettled([
+          this.mailService.sendOrderConfirmationEmail({
+            email: user.email,
+            fullName: user.fullName,
+            orderNumber: order.orderNumber,
+            totalAmount: order.totalAmount,
+            items: emailItems,
+          }),
+
+          this.mailService.sendNewOrderAdminEmail({
+            fullName: user.fullName,
+            email: user.email,
+            orderNumber: order.orderNumber,
+            totalAmount: order.totalAmount,
+            items: emailItems,
+          }),
+        ]);
+      }
+    } catch (error) {
+      /*
+       * Never report a successfully
+       * created order as failed because
+       * of an email notification error.
+       */
+      console.error(
+        'Order email notification error:',
+        error,
+      );
+    }
 
     return {
       message:

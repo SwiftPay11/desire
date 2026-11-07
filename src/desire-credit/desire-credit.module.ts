@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+
 import { MongooseModule } from '@nestjs/mongoose';
 
 import {
@@ -39,6 +40,8 @@ import {
   DesireCreditService,
 } from './desire-credit.service';
 
+import { UsersModule } from '../users/users.module';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -67,6 +70,9 @@ import {
         schema: OrderSchema,
       },
     ]),
+
+    // Required for UsersService injection
+    UsersModule,
   ],
 
   controllers: [
@@ -82,4 +88,5 @@ import {
     MongooseModule,
   ],
 })
+
 export class DesireCreditModule {}

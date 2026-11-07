@@ -17,6 +17,7 @@ import {
   PaymentDocument,
   PaymentPurpose,
   PaymentStatus,
+  PaymentProvider,
 } from './schemas/payment.schema';
 
 import {
@@ -53,6 +54,10 @@ import {
   NotificationType,
 } from '../notifications/schemas/notification.schema';
 
+import { MailService } from '../mail/mail.service';
+
+import { UsersService } from '../users/users.service';
+
 @Injectable()
 export class PaymentsService {
   constructor(
@@ -78,6 +83,12 @@ export class PaymentsService {
 
     private readonly notificationsService:
       NotificationsService,
+
+    private readonly mailService:
+      MailService,
+
+    private readonly usersService:
+      UsersService,
   ) {}
 
   async create(
@@ -461,6 +472,10 @@ export class PaymentsService {
         installment.installmentNumber;
     }
 
+    /*
+     * Create the payment first before accessing
+     * its reference, amount, purpose, or provider.
+     */
     const payment =
       await this.paymentModel.create({
         user: userObjectId,
@@ -473,13 +488,11 @@ export class PaymentsService {
 
         currency,
 
-        provider:
-          dto.provider,
+        provider: dto.provider,
 
         purpose,
 
-        status:
-          PaymentStatus.PENDING,
+        status: PaymentStatus.PENDING,
 
         providerReference: '',
 
@@ -493,6 +506,53 @@ export class PaymentsService {
 
         verifiedAt: null,
       });
+
+    /*
+     * Payment instructions are sent only for
+     * newly created manual ORDER payments.
+     * DESIRE CREDIT notifications will be
+     * handled separately.
+     */
+    if (
+      payment.purpose ===
+        PaymentPurpose.ORDER &&
+      payment.provider ===
+        PaymentProvider.MANUAL
+    ) {
+      try {
+        const user =
+          await this.usersService.findById(
+            userId,
+          );
+
+        if (user?.email) {
+          await this.mailService
+            .sendPaymentInstructionsEmail({
+              email: user.email,
+
+              fullName: user.fullName,
+
+              orderNumber:
+                order.orderNumber,
+
+              paymentReference:
+                payment.reference,
+
+              amount:
+                payment.amount,
+
+              currency:
+                payment.currency,
+            });
+        }
+      } catch (error) {
+        // Email problems must not invalidate payment creation.
+        console.error(
+          'Payment instructions email error:',
+          error,
+        );
+      }
+    }
 
     return {
       message:
@@ -668,6 +728,9 @@ export class PaymentsService {
         );
       }
 
+      const wasAlreadyFailed =
+        payment.status === PaymentStatus.FAILED;
+
       payment.verifiedAt =
         new Date();
 
@@ -697,6 +760,10 @@ export class PaymentsService {
 
           payment.reference,
         );
+      }
+
+      if (!wasAlreadyFailed) {
+        await this.sendOrderPaymentDecisionEmail(payment, false);
       }
 
       return {
@@ -767,6 +834,9 @@ export class PaymentsService {
       );
     }
 
+    const wasAlreadyFailed =
+      payment.status === PaymentStatus.FAILED;
+
     payment.status =
       dto.status;
 
@@ -806,6 +876,13 @@ export class PaymentsService {
         payment.status,
         payment.reference,
       );
+    }
+
+    if (
+      dto.status === PaymentStatus.FAILED &&
+      !wasAlreadyFailed
+    ) {
+      await this.sendOrderPaymentDecisionEmail(payment, false);
     }
 
     return {
@@ -915,6 +992,82 @@ export class PaymentsService {
       },
     );
 
+    /*
+ * ==========================================
+ * STAGE 5.4
+ * PAYMENT SUBMISSION EMAIL NOTIFICATIONS
+ * ==========================================
+ *
+ * Emails are sent only after payment
+ * submission has been saved successfully.
+ *
+ * Email failures must not invalidate
+ * a successfully submitted payment.
+ */
+
+try {
+  const user =
+    await this.usersService.findById(
+      userId,
+    );
+
+  if (user?.email) {
+    const orderNumber =
+      order?.orderNumber ||
+      payment.reference;
+
+    const submittedAmount =
+      payment.submittedAmount;
+
+    await Promise.allSettled([
+      /*
+       * Customer payment submission email
+       */
+      this.mailService.sendPaymentSubmittedEmail({
+        email: user.email,
+
+        fullName: user.fullName,
+
+        orderNumber,
+
+        paymentReference:
+          payment.reference,
+
+        amount:
+          submittedAmount,
+
+        currency:
+          payment.currency,
+      }),
+
+      /*
+       * Admin payment submission email
+       */
+      this.mailService.sendPaymentSubmittedAdminEmail({
+        fullName: user.fullName,
+
+        email: user.email,
+
+        orderNumber,
+
+        paymentReference:
+          payment.reference,
+
+        amount:
+          submittedAmount,
+
+        currency:
+          payment.currency,
+      }),
+    ]);
+  }
+} catch (error) {
+  console.error(
+    'Payment submission email error:',
+    error,
+  );
+}
+
     return {
       message:
         'Payment proof submitted successfully. Your payment is awaiting verification.',
@@ -940,6 +1093,8 @@ export class PaymentsService {
     let finalPayment:
       | PaymentDocument
       | null = null;
+
+    let newlyApproved = false;
 
     try {
       await session.withTransaction(
@@ -1066,6 +1221,8 @@ export class PaymentsService {
 
           finalPayment =
             payment;
+
+          newlyApproved = true;
         },
       );
     } finally {
@@ -1078,6 +1235,12 @@ export class PaymentsService {
       );
     }
 
+    // Only notify for a newly committed normal ORDER payment.
+    // Never send email inside the MongoDB transaction.
+    if (newlyApproved) {
+      await this.sendOrderPaymentDecisionEmail(finalPayment, true);
+    }
+
     return {
       message:
         successMessage,
@@ -1085,6 +1248,51 @@ export class PaymentsService {
       payment:
         finalPayment,
     };
+  }
+
+  /*
+   * STAGES 5.5 + 5.6 — ORDER PAYMENT DECISION EMAILS
+   * DESIRE CREDIT emails are handled in their own stages.
+   * Sending an email must never reverse a saved payment decision.
+   */
+  private async sendOrderPaymentDecisionEmail(
+    payment: PaymentDocument,
+    approved: boolean,
+  ): Promise<void> {
+    if (payment.purpose !== PaymentPurpose.ORDER) {
+      return;
+    }
+
+    try {
+      const [user, order] = await Promise.all([
+        this.usersService.findById(payment.user.toString()),
+        this.orderModel.findById(payment.order),
+      ]);
+
+      if (!user?.email) {
+        return;
+      }
+
+      const details = {
+        email: user.email,
+        fullName: user.fullName,
+        orderNumber: order?.orderNumber || payment.reference,
+        paymentReference: payment.reference,
+        amount: payment.amount,
+        currency: payment.currency,
+      };
+
+      if (approved) {
+        await this.mailService.sendPaymentApprovedEmail(details);
+      } else {
+        await this.mailService.sendPaymentRejectedEmail({
+          ...details,
+          reason: payment.failureReason || undefined,
+        });
+      }
+    } catch (error) {
+      console.error('Payment decision email error:', error);
+    }
   }
 
   /*
