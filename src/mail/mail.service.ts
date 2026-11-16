@@ -3,7 +3,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import {
   desireEmailTemplate,
 } from './templates/desire-email.template';
@@ -13,47 +13,20 @@ export class MailService {
   private readonly logger =
     new Logger(MailService.name);
 
-  private readonly transporter;
+  private readonly resend: Resend | null;
 
   constructor(
     private readonly configService: ConfigService,
   ) {
-    const host =
-      this.configService.get<string>(
-        'MAIL_HOST',
-      );
+    const apiKey = this.configService.get<string>('RESEND_API_KEY');
 
-    const port = Number(
-      this.configService.get<string>(
-        'MAIL_PORT',
-      ) || 465,
-    );
+    if (!apiKey) {
+      this.logger.warn('RESEND_API_KEY is not configured. Email delivery is disabled.');
+      this.resend = null;
+      return;
+    }
 
-    const secure =
-      this.configService.get<string>(
-        'MAIL_SECURE',
-      ) === 'true';
-
-    const user =
-      this.configService.get<string>(
-        'MAIL_USER',
-      );
-
-    const password =
-      this.configService.get<string>(
-        'MAIL_PASSWORD',
-      );
-
-    this.transporter =
-      nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: {
-          user,
-          pass: password,
-        },
-      });
+    this.resend = new Resend(apiKey);
   }
 
   async sendMail({
@@ -68,55 +41,44 @@ export class MailService {
     text?: string;
   }): Promise<boolean> {
     try {
-      const fromName =
-        this.configService.get<string>(
-          'MAIL_FROM_NAME',
-        ) || 'DESIRE';
+      if (!this.resend) {
+        this.logger.error('RESEND_API_KEY is not configured.');
+        return false;
+      }
 
+      const fromName =
+        this.configService.get<string>('MAIL_FROM_NAME') || 'DESIRE';
       const fromEmail =
-        this.configService.get<string>(
-          'MAIL_FROM_EMAIL',
-        );
+        this.configService.get<string>('MAIL_FROM_EMAIL');
 
       if (!fromEmail) {
-        this.logger.error(
-          'MAIL_FROM_EMAIL is not configured.',
-        );
-
+        this.logger.error('MAIL_FROM_EMAIL is not configured.');
         return false;
       }
 
       if (!to) {
-        this.logger.error(
-          'Email recipient is missing.',
-        );
-
+        this.logger.error('Email recipient is missing.');
         return false;
       }
 
-      await this.transporter.sendMail({
-        from: `"${fromName}" <${fromEmail}>`,
-        to,
+      const { data, error } = await this.resend.emails.send({
+        from: `"${fromName.replace(/["\r\n]/g, '')}" <${fromEmail}>`,
+        to: [to],
         subject,
         html,
-        text,
+        ...(text ? { text } : {}),
       });
 
-      this.logger.log(
-        `Email sent successfully to ${to}`,
-      );
+      if (error) {
+        this.logger.error(`Resend email error: ${error.message}`);
+        return false;
+      }
 
+      this.logger.log(`Email accepted by Resend for ${to}. ID: ${data?.id}`);
       return true;
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Unknown mail error';
-
-      this.logger.error(
-        `Unable to send email: ${message}`,
-      );
-
+      const message = error instanceof Error ? error.message : 'Unknown mail error';
+      this.logger.error(`Unable to send email: ${message}`);
       return false;
     }
   }
@@ -350,6 +312,7 @@ async sendOrderConfirmationEmail({
   orderNumber,
   totalAmount,
   items,
+  orderUrl,
 }: {
   email: string;
   fullName: string;
@@ -359,8 +322,12 @@ async sendOrderConfirmationEmail({
     name: string;
     quantity: number;
     price: number;
+    imageUrl?: string;
   }>;
+  orderUrl?: string;
 }): Promise<boolean> {
+  // Existing callers remain compatible. Product photos and the order link
+  // appear only when their real public HTTPS URLs are supplied.
   const formatMoney = (amount: number) =>
     `₦${amount.toLocaleString('en-NG', {
       minimumFractionDigits: 2,
@@ -375,70 +342,92 @@ async sendOrderConfirmationEmail({
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
 
-  const itemsHtml = items
-    .map(
-      (item) => `
-        <tr>
-          <td style="padding:12px 0;border-bottom:1px solid #eee;">
-            ${escapeHtml(item.name)}
-            <br />
-            <span style="color:#777;font-size:12px;">
-              Quantity: ${item.quantity}
-            </span>
-          </td>
-          <td
-            align="right"
-            style="padding:12px 0;border-bottom:1px solid #eee;"
-          >
-            ${formatMoney(item.price * item.quantity)}
-          </td>
-        </tr>
-      `,
-    )
-    .join('');
+  const safeHttpsUrl = (value?: string): string | null => {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' ? url.toString() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const safeOrderUrl = safeHttpsUrl(orderUrl);
+
+  const itemsHtml = items.map((item) => {
+    const imageUrl = safeHttpsUrl(item.imageUrl);
+    const imageCell = imageUrl
+      ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name)}"
+           width="88" height="100"
+           style="display:block;width:88px;height:100px;object-fit:cover;border:1px solid #eeeeee;border-radius:6px;" />`
+      : `<div style="width:88px;height:100px;background:#f4f4f4;border:1px solid #eeeeee;border-radius:6px;text-align:center;line-height:100px;color:#999999;font-size:11px;">DESIRE</div>`;
+
+    return `
+      <tr>
+        <td width="100" valign="top" style="padding:18px 8px 18px 0;border-bottom:1px solid #eeeeee;">
+          ${imageCell}
+        </td>
+        <td valign="top" style="padding:18px 8px;border-bottom:1px solid #eeeeee;">
+          <div style="font-size:14px;font-weight:700;color:#171717;line-height:1.5;">${escapeHtml(item.name)}</div>
+          <div style="font-size:12px;color:#777777;margin-top:8px;">Qty: ${item.quantity}</div>
+          <div style="font-size:12px;color:#777777;margin-top:4px;">Unit: ${formatMoney(item.price)}</div>
+        </td>
+        <td width="110" align="right" valign="top"
+            style="padding:18px 0 18px 8px;border-bottom:1px solid #eeeeee;font-size:13px;font-weight:700;color:#171717;white-space:nowrap;">
+          ${formatMoney(item.price * item.quantity)}
+        </td>
+      </tr>`;
+  }).join('');
+
+  const viewOrderButton = safeOrderUrl
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:28px auto 8px;">
+        <tr><td align="center" bgcolor="#111111" style="border-radius:5px;">
+          <a href="${escapeHtml(safeOrderUrl)}" target="_blank"
+             style="display:inline-block;padding:16px 34px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.4px;">
+            VIEW YOUR ORDER &rarr;
+          </a>
+        </td></tr>
+      </table>`
+    : '';
 
   const html = desireEmailTemplate({
-    eyebrow: 'ORDER CONFIRMATION',
-    title: 'Your order has been received.',
-    message:
-      `Hello ${fullName}, thank you for shopping with DESIRE. ` +
-      'Your order has been placed successfully and is awaiting payment confirmation.',
+    eyebrow: 'YOUR DESIRE ORDER',
+    title: 'We’ve received your order.',
+    message: `Hello ${escapeHtml(fullName)}, thank you for choosing DESIRE. Your order is confirmed as received and is awaiting payment verification. Here is a summary of your items.`,
     content: `
-      <div style="padding:20px;background:#f7f7f5;border:1px solid #e7e7e3;">
-        <p style="margin:0 0 16px;">
-          <strong>Order Number:</strong>
-          ${escapeHtml(orderNumber)}
-        </p>
-
-        <table
-          role="presentation"
-          width="100%"
-          cellspacing="0"
-          cellpadding="0"
-          style="font-family:Arial,sans-serif;font-size:14px;"
-        >
-          ${itemsHtml}
-        </table>
-
-        <p style="margin:20px 0 0;font-size:17px;">
-          <strong>Total: ${formatMoney(totalAmount)}</strong>
-        </p>
-
-        <p style="margin:14px 0 0;color:#666;font-size:12px;">
-          Payment status: Pending
-        </p>
+      <div style="background:#f7f7f5;border:1px solid #e9e9e6;padding:22px 20px;">
+        <div style="font-size:11px;letter-spacing:1.4px;color:#777777;font-weight:700;">ORDER REFERENCE</div>
+        <div style="font-size:19px;font-weight:700;color:#171717;margin-top:7px;">${escapeHtml(orderNumber)}</div>
+        <div style="margin-top:14px;display:inline-block;background:#fff4df;color:#8b5b10;border:1px solid #f0dfb8;padding:7px 11px;font-size:12px;font-weight:700;">
+          PAYMENT PENDING
+        </div>
       </div>
+      <div style="margin-top:26px;">
+        <div style="font-size:17px;font-weight:700;color:#171717;margin-bottom:10px;">Your items (${items.length})</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+               style="border-collapse:collapse;font-family:Arial,sans-serif;">${itemsHtml}</table>
+      </div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+             style="margin-top:24px;background:#f7f7f5;border-collapse:collapse;">
+        <tr><td style="padding:20px;color:#555555;font-size:14px;">Order total</td>
+            <td align="right" style="padding:20px;font-size:20px;font-weight:700;color:#111111;">${formatMoney(totalAmount)}</td></tr>
+      </table>
+      ${viewOrderButton}
+      <p style="font-size:13px;color:#777777;line-height:1.8;margin:22px 0 0;">
+        We’ll update you when your payment is verified. Keep your order number for reference.
+      </p>
     `,
+    footerText: 'DESIRE — Luxury designed with intention.',
   });
 
   return this.sendMail({
     to: email,
-    subject: `DESIRE — Order Confirmation ${orderNumber}`,
+    subject: `DESIRE — Order Received ${orderNumber}`,
     html,
     text:
-      `Hello ${fullName}, your DESIRE order ${orderNumber} ` +
-      `has been received. Total: ${formatMoney(totalAmount)}. ` +
-      'Payment is pending.',
+      `Hello ${fullName}, your DESIRE order ${orderNumber} has been received. ` +
+      `Total: ${formatMoney(totalAmount)}. Payment is pending.` +
+      (safeOrderUrl ? ` View your order: ${safeOrderUrl}` : ''),
   });
 }
 
